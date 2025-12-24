@@ -41,6 +41,15 @@
             text-shadow: 0 2px 4px black; pointer-events: none;
             opacity: 0; transition: opacity 1s;
         }
+
+        /* Nút Bật/Tắt Nhạc */
+        #music-toggle {
+            position: absolute; top: 20px; right: 20px; z-index: 100;
+            background: rgba(0,0,0,0.5); color: white; border: 1px solid white;
+            width: 40px; height: 40px; border-radius: 50%;
+            display: none; /* Ẩn lúc đầu */
+            align-items: center; justify-content: center; font-size: 20px; cursor: pointer;
+        }
     </style>
     <script type="importmap">
         {
@@ -52,6 +61,10 @@
     </script>
 </head>
 <body>
+    <audio id="bg-music" loop>
+        <source src="media/music.mp3" type="audio/mp3">
+    </audio>
+
     <video id="input-video" playsinline muted autoplay></video>
     
     <div id="start-overlay">
@@ -61,11 +74,12 @@
             <span style="color: #ffd700; font-weight: bold;">Chạm & Giữ tay trên màn hình</span><br>
             để mở hộp quà bí mật nhé!
         </p>
-        <button id="start-btn">BẮT ĐẦU KHÁM PHÁ</button>
-        <p style="font-size: 11px; color: #777; margin-top: 20px;">*Yêu cầu quyền Camera để hiển thị thực tế ảo</p>
+        <button id="start-btn">MỞ QUÀ & BẬT NHẠC 🎶</button>
+        <p style="font-size: 11px; color: #777; margin-top: 20px;">*Yêu cầu quyền Camera</p>
     </div>
 
     <div id="hint">👆 Giữ tay để xem ảnh kỷ niệm</div>
+    <div id="music-toggle">🔊</div>
     <div id="canvas-container"></div>
 
     <script type="module">
@@ -73,10 +87,7 @@
 
         // --- CẤU HÌNH ---
         const CONFIG = {
-            particleCount: 1800, 
-            treeHeight: 25, 
-            treeRadius: 10,
-            ringRadius: 18, // Bán kính vòng tròn khi tản ra để hiện ảnh
+            particleCount: 1800, treeHeight: 25, treeRadius: 10, ringRadius: 18, 
             colors: [0xff0000, 0x00ff00, 0xffd700, 0xffffff] 
         };
 
@@ -84,15 +95,36 @@
         let treePositions = [], ringPositions = [];
         let isTouching = false;
         let imageList = [];
-        let loadedTextures = {}; // Cache ảnh để load nhanh hơn
+        let loadedTextures = {};
 
         // --- 1. SETUP ---
         document.getElementById('start-btn').addEventListener('click', async () => {
             document.getElementById('start-overlay').style.display = 'none';
             document.getElementById('hint').style.opacity = 1;
+            
+            // Xử lý Nhạc
+            const music = document.getElementById('bg-music');
+            const musicBtn = document.getElementById('music-toggle');
+            music.volume = 0.5; // Để nhạc vừa phải
+            music.play().then(() => {
+                musicBtn.style.display = 'flex'; // Chỉ hiện nút nhạc khi nhạc đã chạy
+            }).catch(e => console.log("Không thể tự phát nhạc:", e));
+
             setupCamera();
             init3D();
-            loadMediaManifest(); // Tải danh sách ảnh ngầm
+            loadMediaManifest();
+        });
+
+        // Xử lý nút tắt/bật nhạc
+        document.getElementById('music-toggle').addEventListener('click', function() {
+            const music = document.getElementById('bg-music');
+            if (music.paused) {
+                music.play();
+                this.innerText = '🔊';
+            } else {
+                music.pause();
+                this.innerText = '🔇';
+            }
         });
 
         async function setupCamera() {
@@ -103,9 +135,7 @@
                 const video = document.getElementById('input-video');
                 video.srcObject = stream;
                 video.play();
-            } catch (err) {
-                console.log("Camera denied:", err);
-            }
+            } catch (err) { console.log("Camera denied:", err); }
         }
 
         async function loadMediaManifest() {
@@ -113,15 +143,13 @@
                 const res = await fetch('media/manifest.json');
                 const data = await res.json();
                 imageList = data.images || [];
-                console.log("Loaded images:", imageList);
-            } catch (e) { console.warn('Chưa có file manifest.json hoặc lỗi tải.'); }
+            } catch (e) { console.warn('Manifest loading failed'); }
         }
 
         // --- 2. 3D SCENE ---
         function init3D() {
             const container = document.getElementById('canvas-container');
             scene = new THREE.Scene();
-            
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(0, 0, 50);
 
@@ -131,7 +159,7 @@
             container.appendChild(renderer.domElement);
 
             createParticles();
-            createPhotoFrame(); // Tạo khung ảnh sẵn (ẩn đi)
+            createPhotoFrame();
             setupInteraction();
             animate();
         }
@@ -139,174 +167,87 @@
         function createParticles() {
             const posArray = [], colArray = [], sizeArray = [];
             const colorHelper = new THREE.Color();
-
             for (let i = 0; i < CONFIG.particleCount; i++) {
                 const h = i / CONFIG.particleCount; 
                 const angle = i * 0.15;
-                
-                // 1. Dáng Cây Thông
                 const r = (1 - h) * CONFIG.treeRadius + h * 2; 
-                const y = (0.5 - h) * CONFIG.treeHeight;
                 const x = r * Math.cos(angle * 5 + i);
+                const y = (0.5 - h) * CONFIG.treeHeight;
                 const z = r * Math.sin(angle * 5 + i);
                 treePositions.push(x, y, z);
                 
-                // 2. Dáng Vòng Tròn (Hào quang xung quanh ảnh)
-                // Tạo thành một vòng ring rỗng ở giữa để hiện ảnh
                 const ringAngle = Math.random() * Math.PI * 2;
-                const ringR = CONFIG.ringRadius + Math.random() * 5; // Bán kính lớn
-                const ringY = (Math.random() - 0.5) * 30; // Chiều cao ngẫu nhiên
-                // Ép các hạt tránh xa tâm (nơi đặt ảnh)
-                ringPositions.push(
-                    ringR * Math.cos(ringAngle), 
-                    ringY, 
-                    ringR * Math.sin(ringAngle)
-                );
+                const ringR = CONFIG.ringRadius + Math.random() * 5;
+                ringPositions.push(ringR * Math.cos(ringAngle), (Math.random()-0.5)*30, ringR * Math.sin(ringAngle));
                 
-                // Init buffers
                 posArray.push(x, y, z);
                 colorHelper.setHex(CONFIG.colors[Math.floor(Math.random() * CONFIG.colors.length)]);
                 colArray.push(colorHelper.r, colorHelper.g, colorHelper.b);
                 sizeArray.push(Math.random());
             }
-
             const pGeo = new THREE.BufferGeometry();
             pGeo.setAttribute('position', new THREE.Float32BufferAttribute(posArray, 3));
             pGeo.setAttribute('color', new THREE.Float32BufferAttribute(colArray, 3));
             pGeo.setAttribute('size', new THREE.Float32BufferAttribute(sizeArray, 1));
-
-            const particleMat = new THREE.PointsMaterial({ 
-                size: 0.8, vertexColors: true, blending: THREE.AdditiveBlending, 
-                depthWrite: false, transparent: true, opacity: 0.9 
-            });
-
-            particles = new THREE.Points(pGeo, particleMat);
+            particles = new THREE.Points(pGeo, new THREE.PointsMaterial({ size: 0.8, vertexColors: true, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.9 }));
             scene.add(particles);
         }
 
         function createPhotoFrame() {
             photoGroup = new THREE.Group();
-            
-            // Tạo khung viền vàng
-            const frameGeo = new THREE.PlaneGeometry(16.5, 12.5); // Tỉ lệ 4:3 + viền
-            const frameMat = new THREE.MeshBasicMaterial({ color: 0xffd700 });
-            const frameMesh = new THREE.Mesh(frameGeo, frameMat);
-            frameMesh.position.z = -0.1; // Đặt ra sau ảnh chút
+            const frameMesh = new THREE.Mesh(new THREE.PlaneGeometry(16.5, 12.5), new THREE.MeshBasicMaterial({ color: 0xffd700 }));
+            frameMesh.position.z = -0.1;
             photoGroup.add(frameMesh);
-
-            // Tạo chỗ hiển thị ảnh
-            const geo = new THREE.PlaneGeometry(16, 12);
-            const mat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0 });
-            photoMesh = new THREE.Mesh(geo, mat);
+            photoMesh = new THREE.Mesh(new THREE.PlaneGeometry(16, 12), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0 }));
             photoGroup.add(photoMesh);
-
-            photoGroup.visible = false; // Mặc định ẩn
+            photoGroup.visible = false;
             scene.add(photoGroup);
         }
 
         function showRandomPhoto() {
             if (imageList.length === 0) return;
-            
-            // Random ảnh
-            const imgName = imageList[Math.floor(Math.random() * imageList.length)];
-            const imgPath = `media/${imgName}`;
-
-            const textureLoader = new THREE.TextureLoader();
-            
-            // Hàm update texture
+            const imgPath = `media/${imageList[Math.floor(Math.random() * imageList.length)]}`;
             const updateTex = (tex) => {
                 photoMesh.material.map = tex;
-                
-                // Tự động chỉnh tỉ lệ khung theo ảnh
                 const aspect = tex.image.width / tex.image.height;
-                // Giữ chiều cao cố định là 12, tính chiều rộng
-                const newWidth = 12 * aspect;
                 photoMesh.scale.set(aspect, 1, 1); 
-                
-                // Chỉnh lại viền vàng phía sau cho vừa ảnh
                 photoGroup.children[0].scale.set(aspect * 1.05, 1.05, 1);
-                
                 photoMesh.material.needsUpdate = true;
             };
-
-            // Kiểm tra cache xem đã tải chưa
-            if (loadedTextures[imgPath]) {
-                updateTex(loadedTextures[imgPath]);
-            } else {
-                textureLoader.load(imgPath, (tex) => {
-                    loadedTextures[imgPath] = tex;
-                    updateTex(tex);
-                });
-            }
-
+            if (loadedTextures[imgPath]) updateTex(loadedTextures[imgPath]);
+            else new THREE.TextureLoader().load(imgPath, (tex) => { loadedTextures[imgPath] = tex; updateTex(tex); });
             photoGroup.visible = true;
         }
 
-        // --- 3. TƯƠNG TÁC ---
         function setupInteraction() {
-            const onDown = () => { 
-                if(!isTouching) {
-                    isTouching = true; 
-                    showRandomPhoto();
-                    document.getElementById('hint').style.opacity = 0; // Ẩn hướng dẫn
-                }
-            };
-            const onUp = () => { 
-                isTouching = false; 
-                // Không ẩn ngay photoGroup để cho hiệu ứng fade out trong animate xử lý
-            };
-
-            window.addEventListener('pointerdown', onDown);
-            window.addEventListener('pointerup', onUp);
-            // Hỗ trợ cả touch
-            window.addEventListener('touchstart', onDown);
-            window.addEventListener('touchend', onUp);
-
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            });
+            const onDown = () => { if(!isTouching) { isTouching = true; showRandomPhoto(); document.getElementById('hint').style.opacity = 0; }};
+            const onUp = () => { isTouching = false; };
+            window.addEventListener('pointerdown', onDown); window.addEventListener('pointerup', onUp);
+            window.addEventListener('touchstart', onDown); window.addEventListener('touchend', onUp);
+            window.addEventListener('resize', () => { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
         }
 
-        // --- 4. ANIMATION LOOP ---
         function animate() {
             requestAnimationFrame(animate);
-
-            // 1. Xử lý Hạt (Particles)
-            const positions = particles.geometry.attributes.position.array;
-            const target = isTouching ? ringPositions : treePositions; // Chọn đích đến
-            const lerpSpeed = isTouching ? 0.05 : 0.08; // Tản ra chậm, tụ lại nhanh
-
-            for (let i = 0; i < CONFIG.particleCount * 3; i++) {
-                positions[i] += (target[i] - positions[i]) * lerpSpeed;
-            }
+            const pos = particles.geometry.attributes.position.array;
+            const target = isTouching ? ringPositions : treePositions;
+            const lerpSpeed = isTouching ? 0.05 : 0.08;
+            for (let i = 0; i < CONFIG.particleCount * 3; i++) pos[i] += (target[i] - pos[i]) * lerpSpeed;
             particles.geometry.attributes.position.needsUpdate = true;
 
-            // 2. Xử lý Ảnh (Fade In/Out)
             if (isTouching) {
-                // Fade In
                 if (photoMesh.material.opacity < 1) photoMesh.material.opacity += 0.05;
-                photoGroup.scale.setScalar(THREE.MathUtils.lerp(photoGroup.scale.x, 1, 0.1)); // Zoom in nhẹ
-                particles.rotation.y += 0.002; // Xoay chậm khi xem ảnh
+                photoGroup.scale.setScalar(THREE.MathUtils.lerp(photoGroup.scale.x, 1, 0.1));
+                particles.rotation.y += 0.002;
             } else {
-                // Fade Out
-                if (photoMesh.material.opacity > 0) {
-                    photoMesh.material.opacity -= 0.1;
-                } else {
-                    photoGroup.visible = false; // Ẩn hẳn khi đã trong suốt
-                }
-                photoGroup.scale.setScalar(0.8); // Reset zoom
-                particles.rotation.y += 0.01; // Xoay nhanh khi là cây
+                if (photoMesh.material.opacity > 0) photoMesh.material.opacity -= 0.1;
+                else photoGroup.visible = false;
+                photoGroup.scale.setScalar(0.8);
+                particles.rotation.y += 0.01;
             }
-
-            // Hiệu ứng lấp lánh hạt
             const sizes = particles.geometry.attributes.size.array;
-            for(let i=0; i < CONFIG.particleCount; i++){
-                sizes[i] = 0.5 + 0.5 * Math.sin(Date.now() * 0.005 + i);
-            }
+            for(let i=0; i < CONFIG.particleCount; i++) sizes[i] = 0.5 + 0.5 * Math.sin(Date.now() * 0.005 + i);
             particles.geometry.attributes.size.needsUpdate = true;
-
             renderer.render(scene, camera);
         }
     </script>
